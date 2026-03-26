@@ -55,6 +55,23 @@ uv run python prepare_ultrachat.py --model_type qwen3.5 --output_dir data
 
 `prepare_ultrachat.py` は会話を assistant 応答単位の学習サンプルへ展開し、長い会話でも入る最大の履歴窓を選ぶようになっています。より長い文脈を残したい場合は `--max_length` と `--max_output_length` を調整してください。Windows では multiprocessing の上限回避のため `--num_proc` が自動で抑えられます。
 
+UltraChat 以外のデータセットには `prepare_chat_dataset.py` を使ってください。Hugging Face dataset と local の `json/jsonl/parquet` に対応し、`messages`、`chosen`、ShareGPT、Alpaca、prompt-response を正規化できます。`--multimodal_mode` と `--enable_thinking` も指定できます。
+
+```bash
+uv run python prepare_chat_dataset.py \
+  --dataset json \
+  --train_files data/custom/train.jsonl \
+  --eval_files data/custom/valid.jsonl \
+  --input_format messages \
+  --messages_column messages \
+  --model_type qwen3.5 \
+  --output_name custom-qwen3.5 \
+  --multimodal_mode preserve \
+  --enable_thinking false
+```
+
+`multimodal_mode=preserve` は chat template が出す modality token を保持します。現状の学習器自体は text-only なので、画像 tensor そのものではなく特殊 token を残す挙動です。
+
 ## 学習
 
 各手法の実行スクリプトは [scripts](./scripts) 配下にあります。たとえば Llama-2 系の TAID 実験は [scripts/llama-2](./scripts/llama-2) にあり、次のコマンドで実行できます。

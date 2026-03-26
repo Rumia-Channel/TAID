@@ -55,6 +55,23 @@ uv run python prepare_ultrachat.py --model_type qwen3.5 --output_dir data
 
 `prepare_ultrachat.py` now expands each conversation into assistant-turn training samples and keeps long examples by selecting the largest fitting history window. For longer contexts, you can raise `--max_length` and `--max_output_length`; on Windows, `--num_proc` is capped automatically to avoid multiprocessing handle limits.
 
+For datasets other than UltraChat, use `prepare_chat_dataset.py`. It accepts Hugging Face datasets or local `json/jsonl/parquet`, supports `messages`, `chosen`, ShareGPT, Alpaca, and prompt-response layouts, and lets you control `--multimodal_mode` plus `--enable_thinking`.
+
+```bash
+uv run python prepare_chat_dataset.py \
+  --dataset json \
+  --train_files data/custom/train.jsonl \
+  --eval_files data/custom/valid.jsonl \
+  --input_format messages \
+  --messages_column messages \
+  --model_type qwen3.5 \
+  --output_name custom-qwen3.5 \
+  --multimodal_mode preserve \
+  --enable_thinking false
+```
+
+`multimodal_mode=preserve` keeps modality markers emitted by the chat template. The current training stack is still text-only, so this preserves modality tokens rather than image tensors.
+
 ## Training
 
 We provide bash scripts for various methods in the [scripts](./scripts) directory. For example, the scripts for the experiments distilling from Llama-2 to TinyLlama can be found in [scripts/llama-2](./scripts/llama-2) directory. For instance, running the following command will execute training with TAID.
