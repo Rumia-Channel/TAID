@@ -36,6 +36,36 @@ def parse_args():
         "--num_workers", type=int, default=4, help="number of workers for data loader"
     )
     parser.add_argument("--lr", type=float, default=1.0e-4, help="learning rate")
+    parser.add_argument(
+        "--accelerator",
+        type=str,
+        default="auto",
+        help="lightning accelerator (for example: auto, cuda, xpu, cpu)",
+    )
+    parser.add_argument(
+        "--devices",
+        type=str,
+        default="auto",
+        help="lightning devices value (for example: auto, 1, 0,1,2,3)",
+    )
+    parser.add_argument(
+        "--precision",
+        type=str,
+        default="bf16-mixed",
+        help="lightning precision mode",
+    )
+    parser.add_argument(
+        "--strategy",
+        type=str,
+        default="auto",
+        help="training strategy (for example: auto, ddp, deepspeed_stage_2)",
+    )
+    parser.add_argument(
+        "--attn_implementation",
+        type=str,
+        default="auto",
+        help="transformers attention implementation (for example: auto, sdpa, flash_attention_2)",
+    )
 
     # loss
     parser.add_argument("--loss_type", type=str, required=True, help="loss type")

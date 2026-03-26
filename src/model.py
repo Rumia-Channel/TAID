@@ -22,6 +22,22 @@ def initialize_generation_config(tokenizer, generation_config):
     return generation_config
 
 
+def _flash_attn_available() -> bool:
+    try:
+        import flash_attn  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+def resolve_attn_implementation(requested: str) -> str:
+    if requested != "auto":
+        return requested
+    if torch.cuda.is_available() and _flash_attn_available():
+        return "flash_attention_2"
+    return "sdpa"
+
+
 class KDForLM(L.LightningModule):
     def __init__(self, args, tokenizer, generation_config=None):
         super().__init__()
@@ -38,16 +54,20 @@ class KDForLM(L.LightningModule):
         self.validation_step_outputs = {}
 
     def configure_model(self):
+        attn_implementation = resolve_attn_implementation(
+            self.args.attn_implementation
+        )
+        self.print(f"Using attention implementation: {attn_implementation}")
         self.student_model = AutoModelForCausalLM.from_pretrained(
             self.args.student_model,
             torch_dtype=torch.bfloat16,
-            attn_implementation="flash_attention_2",
+            attn_implementation=attn_implementation,
         )
         self.student_model.resize_token_embeddings(len(self.tokenizer))
         self.teacher_model = AutoModelForCausalLM.from_pretrained(
             self.args.teacher_model,
             torch_dtype=torch.bfloat16,
-            attn_implementation="flash_attention_2",
+            attn_implementation=attn_implementation,
         )
         self.teacher_model.resize_token_embeddings(len(self.tokenizer))
 

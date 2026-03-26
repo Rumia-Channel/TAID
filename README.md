@@ -10,26 +10,41 @@ This is an official Pytorch implementation of "TAID: Temporally Adaptive Interpo
 
 ## Installation
 
+This repository now uses `uv` for environment and dependency management.
+
 ```bash
-pip install torch==2.2.2 --index-url https://download.pytorch.org/whl/cu121
-pip install -r requirements.txt
-git clone https://github.com/Dao-AILab/flash-attention.git
-cd flash-attention
-python setup.py install
+# CPU only
+uv sync --extra cpu
+
+# CUDA 12.8
+uv sync --extra cuda
+
+# ROCm 6.4 (Linux only)
+uv sync --extra rocm
+
+# Intel XPU (Linux / Windows)
+uv sync --extra xpu
+
+# Optional: DeepSpeed for multi-GPU CUDA training
+uv sync --extra cuda --extra deepspeed
 
 # make sure to login huggingface and wandb
-huggingface-cli login
-wandb login
+uv run huggingface-cli login
+uv run wandb login
 ```
 
-We conducted our experiments in the following environment: Python Version 3.10.12 and CUDA Version 12.3 on 8 * H100 80GB.
+`uv pip` users can also rely on automatic PyTorch backend detection because `torch-backend = "auto"` is configured for the pip-compatible interface.
+
+FlashAttention is now optional. When it is installed and CUDA is available, the training code uses `flash_attention_2`; otherwise it falls back to `sdpa` automatically.
+
+We conducted our original experiments in the following environment: Python 3.10.12 and CUDA 12.3 on 8 x H100 80GB. The default `uv` setup uses PyTorch 2.9.1 with backend-specific wheels.
 
 ## Data Preparation
 
 This is the script to prepare data for [Phi-3-mini](https://huggingface.co/microsoft/Phi-3-mini-4k-instruct).
 
 ```bash
-python prepare_ultrachat.py --model_type phi-3 --output_dir data
+uv run python prepare_ultrachat.py --model_type phi-3 --output_dir data
 ```
 
 ## Training
@@ -37,8 +52,26 @@ python prepare_ultrachat.py --model_type phi-3 --output_dir data
 We provide bash scripts for various methods in the [scripts](./scripts) directory. For example, the scripts for the experiments distilling from Llama-2 to TinyLlama can be found in [scripts/llama-2](./scripts/llama-2) directory. For instance, running the following command will execute training with TAID.
 
 ```bash
-bash scripts/llama-2/taid.sh
+uv run bash scripts/llama-2/taid.sh
 ```
+
+For direct invocation without shell scripts:
+
+```bash
+uv run python train.py \
+  --teacher_model microsoft/Phi-3-mini-4k-instruct \
+  --student_model TinyLlama/TinyLlama_v1.1 \
+  --data_path data/phi-3 \
+  --output_dir logs/phi-3-taid \
+  --loss_type taid
+```
+
+Relevant portability flags:
+
+- `--accelerator auto|cuda|xpu|cpu`
+- `--devices auto|1|0,1,2,3`
+- `--strategy auto|ddp|deepspeed_stage_2`
+- `--attn_implementation auto|sdpa|flash_attention_2`
 
 ## Acknowledgement
 
