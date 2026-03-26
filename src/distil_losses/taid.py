@@ -25,15 +25,9 @@ class TAID(DistilLoss):
         self.alpha = alpha
         self.beta = beta
         self.disable_adaptive = disable_adaptive
-        self.register_buffer(
-            "t", torch.tensor(t_start, device="cuda", dtype=torch.float32)
-        )
-        self.register_buffer(
-            "prev_loss", torch.tensor(float("inf"), device="cuda", dtype=torch.float32)
-        )
-        self.register_buffer(
-            "momentum", torch.zeros([], device="cuda", dtype=torch.float32)
-        )
+        self.register_buffer("t", torch.tensor(t_start, dtype=torch.float32))
+        self.register_buffer("prev_loss", torch.tensor(float("inf"), dtype=torch.float32))
+        self.register_buffer("momentum", torch.zeros([], dtype=torch.float32))
 
     def update_t(
         self, loss: torch.Tensor, global_step: int, num_train_steps: int

@@ -87,15 +87,16 @@ class KDForLM(L.LightningModule):
             self.args.student_model,
             **model_kwargs,
         )
-        self.teacher_model = model_cls.from_pretrained(
-            self.args.teacher_model,
-            **model_kwargs,
-        )
         vocab_size = len(self.tokenizer)
         if self.student_model.get_input_embeddings().num_embeddings != vocab_size:
             self.student_model.resize_token_embeddings(vocab_size)
-        if self.teacher_model.get_input_embeddings().num_embeddings != vocab_size:
-            self.teacher_model.resize_token_embeddings(vocab_size)
+        if self.loss_fn.distil_loss_fn is not None:
+            self.teacher_model = model_cls.from_pretrained(
+                self.args.teacher_model,
+                **model_kwargs,
+            )
+            if self.teacher_model.get_input_embeddings().num_embeddings != vocab_size:
+                self.teacher_model.resize_token_embeddings(vocab_size)
 
     def forward(self, batch: Dict[str, Tensor], **kwargs) -> LossOutput:
         outputs: LossOutput = self.loss_fn(lightning_module=self, batch=batch, **kwargs)

@@ -63,6 +63,16 @@ def run_sample(model, gen_data, pad_token_id, generation_config, return_ids=Fals
         )
         * -100,
     }
+    if "mm_token_type_ids" in gen_data:
+        results["mm_token_type_ids"] = torch.zeros(
+            bs,
+            max_length,
+            dtype=gen_data["mm_token_type_ids"].dtype,
+            device=gen_data["mm_token_type_ids"].device,
+        )
+    for key in ["pixel_values", "pixel_values_videos", "image_grid_thw", "video_grid_thw"]:
+        if key in gen_data:
+            results[key] = gen_data[key]
 
     full_ids = model.generate(
         **gen_data,
@@ -83,6 +93,19 @@ def run_sample(model, gen_data, pad_token_id, generation_config, return_ids=Fals
 
         results["input_ids"][i, : len(result_id)] = result_id
         results["labels"][i, len(input_id) : len(result_id)] = response_id
+        if "mm_token_type_ids" in gen_data:
+            input_mm = gen_data["mm_token_type_ids"][i][input_ids[i] != pad_token_id]
+            result_mm = torch.cat(
+                [
+                    input_mm,
+                    torch.zeros(
+                        len(response_id),
+                        dtype=input_mm.dtype,
+                        device=input_mm.device,
+                    ),
+                ]
+            )
+            results["mm_token_type_ids"][i, : len(result_mm)] = result_mm
     results["attention_mask"] = torch.where(results["input_ids"] != pad_token_id, 1, 0)
     results["attention_mask"] = results["attention_mask"].long()
     results["labels"] = results["labels"].long()
@@ -149,14 +172,25 @@ class SampleGenerator(nn.Module):
 
         model_batch = None
         gen_data = self.get_model_inputs_gen(batch)
-        if "pixel_values" in gen_data or "pixel_values_videos" in gen_data:
-            raise NotImplementedError(
-                "sampling_type is not supported for multimodal batches yet. Disable --sampling_type when using image inputs."
-            )
+        multimodal = "pixel_values" in gen_data or "pixel_values_videos" in gen_data
         # data generation from student models
         if not lightning_module.training:
             # no sampling during eval
             model_batch = None
+        elif multimodal and self.sampling_type == "mixed" and r < self.mixed_alpha:
+            model_batch = run_sample(
+                lightning_module.student_model,
+                gen_data,
+                pad_token_id=get_pad_token_id(lightning_module.preprocessor),
+                generation_config=generation_config,
+            )
+        elif multimodal and self.sampling_type == "adaptive" and r < self.adaptive_threshold:
+            model_batch = run_sample(
+                lightning_module.student_model,
+                gen_data,
+                pad_token_id=get_pad_token_id(lightning_module.preprocessor),
+                generation_config=generation_config,
+            )
         elif self.sampling_type == "mixed" and r < self.mixed_alpha:
             bsz = gen_data["input_ids"].size(0)
 

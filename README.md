@@ -71,7 +71,7 @@ uv run python prepare_chat_dataset.py \
   --enable_thinking false
 ```
 
-With `--use_processor` and `multimodal_mode=preserve`, native multimodal processors such as Qwen3.5 can precompute `pixel_values` and related vision tensors for training. `--sampling_type` is still text-only and should be left unset for multimodal batches.
+With `--use_processor` and `multimodal_mode=preserve`, native multimodal processors such as Qwen3.5 can precompute `pixel_values` and related vision tensors for training. `--sampling_type` also works for multimodal batches now, but it uses current-batch generation rather than the replay-buffer path used for text-only data.
 
 ## Training
 

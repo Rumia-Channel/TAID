@@ -4,11 +4,13 @@ from lightning.pytorch.callbacks import ModelCheckpoint
 from src.data import StreamingSFTDataModule
 from src.model import KDForLM
 from src.arguments import parse_args
+from src.xpu_accelerator import XPUAccelerator
 
 try:
-    from lightning.pytorch.strategies import DeepSpeedStrategy
+    from lightning.pytorch.strategies import DeepSpeedStrategy, SingleDeviceStrategy
 except ImportError:
     DeepSpeedStrategy = None
+    SingleDeviceStrategy = None
 
 
 def parse_devices(value: str):
@@ -23,6 +25,16 @@ def parse_devices(value: str):
 
 
 def get_strategy(args):
+    if args.accelerator == "xpu":
+        if SingleDeviceStrategy is None:
+            raise ImportError("Lightning SingleDeviceStrategy is unavailable.")
+        devices = parse_devices(args.devices)
+        if devices not in {"auto", 1}:
+            raise ValueError("XPU execution currently supports only a single device.")
+        if not hasattr(torch, "xpu") or not torch.xpu.is_available():
+            raise RuntimeError("XPU accelerator requested but torch.xpu is unavailable.")
+        return SingleDeviceStrategy(device=torch.device("xpu", 0))
+
     if args.strategy == "deepspeed_stage_2":
         if DeepSpeedStrategy is None:
             raise ImportError(
@@ -45,6 +57,12 @@ def get_strategy(args):
             stage=2, allgather_bucket_size=5e8, reduce_bucket_size=5e8
         )
     return "auto"
+
+
+def get_accelerator(args):
+    if args.accelerator == "xpu":
+        return XPUAccelerator()
+    return args.accelerator
 
 if __name__ == "__main__":
     args = parse_args()
@@ -72,7 +90,7 @@ if __name__ == "__main__":
         save_last=False,
     )
     trainer = L.Trainer(
-        accelerator=args.accelerator,
+        accelerator=get_accelerator(args),
         devices=parse_devices(args.devices),
         max_epochs=args.num_epochs,
         val_check_interval=args.val_check_interval,

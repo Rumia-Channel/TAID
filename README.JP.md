@@ -71,7 +71,7 @@ uv run python prepare_chat_dataset.py \
   --enable_thinking false
 ```
 
-`--use_processor` と `multimodal_mode=preserve` を併用すると、Qwen3.5 のようなネイティブ multimodal processor で `pixel_values` などの画像 tensor まで前計算できます。なお `--sampling_type` はまだ text-only 前提なので、multimodal バッチでは未指定にしてください。
+`--use_processor` と `multimodal_mode=preserve` を併用すると、Qwen3.5 のようなネイティブ multimodal processor で `pixel_values` などの画像 tensor まで前計算できます。`--sampling_type` も multimodal バッチで使えますが、text-only の replay buffer ではなく current-batch generation ベースで動きます。
 
 ## 学習
 
