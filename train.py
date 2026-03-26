@@ -57,6 +57,8 @@ if __name__ == "__main__":
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         trust_remote_code=args.trust_remote_code,
+        max_input_len=args.max_input_len,
+        max_output_len=args.max_output_len,
     )
     model = KDForLM(args, tokenizer=data.tokenizer)
     modelcheckpoint = ModelCheckpoint(

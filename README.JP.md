@@ -53,6 +53,8 @@ Qwen3.5 もサポートしています:
 uv run python prepare_ultrachat.py --model_type qwen3.5 --output_dir data
 ```
 
+`prepare_ultrachat.py` は会話を assistant 応答単位の学習サンプルへ展開し、長い会話でも入る最大の履歴窓を選ぶようになっています。より長い文脈を残したい場合は `--max_length` と `--max_output_length` を調整してください。Windows では multiprocessing の上限回避のため `--num_proc` が自動で抑えられます。
+
 ## 学習
 
 各手法の実行スクリプトは [scripts](./scripts) 配下にあります。たとえば Llama-2 系の TAID 実験は [scripts/llama-2](./scripts/llama-2) にあり、次のコマンドで実行できます。

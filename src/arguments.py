@@ -58,6 +58,18 @@ def parse_args():
     parser.add_argument(
         "--num_workers", type=int, default=4, help="number of workers for data loader"
     )
+    parser.add_argument(
+        "--max_input_len",
+        type=int,
+        default=1536,
+        help="maximum prompt length for batching",
+    )
+    parser.add_argument(
+        "--max_output_len",
+        type=int,
+        default=512,
+        help="maximum target response length for batching",
+    )
     parser.add_argument("--lr", type=float, default=1.0e-4, help="learning rate")
     parser.add_argument(
         "--accelerator",

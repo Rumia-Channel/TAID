@@ -53,6 +53,8 @@ Qwen3.5 is also supported:
 uv run python prepare_ultrachat.py --model_type qwen3.5 --output_dir data
 ```
 
+`prepare_ultrachat.py` now expands each conversation into assistant-turn training samples and keeps long examples by selecting the largest fitting history window. For longer contexts, you can raise `--max_length` and `--max_output_length`; on Windows, `--num_proc` is capped automatically to avoid multiprocessing handle limits.
+
 ## Training
 
 We provide bash scripts for various methods in the [scripts](./scripts) directory. For example, the scripts for the experiments distilling from Llama-2 to TinyLlama can be found in [scripts/llama-2](./scripts/llama-2) directory. For instance, running the following command will execute training with TAID.
