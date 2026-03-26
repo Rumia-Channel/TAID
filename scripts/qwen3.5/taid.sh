@@ -1,0 +1,11 @@
+python train.py \
+    --student_model Qwen/Qwen3.5-2B \
+    --teacher_model Qwen/Qwen3.5-9B \
+    --data_path data/qwen3.5 \
+    --output_dir logs/qwen3.5-taid \
+    --batch_size 4 \
+    --num_epochs 5 \
+    --loss_type taid \
+    --taid_t_start 0.4 \
+    --taid_alpha 5.e-4 \
+    --taid_beta 0.99

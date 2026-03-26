@@ -1,0 +1,94 @@
+[project]
+name = "taid"
+version = "0.1.0"
+description = "Temporally Adaptive Interpolated Distillation for language models"
+readme = "README.md"
+requires-python = ">=3.10,<3.13"
+dependencies = [
+    "absl-py",
+    "accelerate",
+    "datasets",
+    "evaluate",
+    "lightning",
+    "litdata",
+    "natsort",
+    "nltk",
+    "numerize",
+    "numpy",
+    "protobuf",
+    "rich",
+    "rouge-score",
+    "safetensors",
+    "sentencepiece",
+    "torchtyping",
+    "transformers",
+    "wandb",
+]
+
+[project.optional-dependencies]
+cpu = [
+    "torch",
+]
+cuda = [
+    "torch; sys_platform == 'linux' or sys_platform == 'win32'",
+]
+rocm = [
+    "torch; sys_platform == 'linux'",
+    "pytorch-triton-rocm; sys_platform == 'linux'",
+]
+xpu = [
+    "torch; sys_platform == 'linux' or sys_platform == 'win32'",
+    "pytorch-triton-xpu; sys_platform == 'linux' or sys_platform == 'win32'",
+]
+deepspeed = [
+    "deepspeed; sys_platform == 'linux'",
+]
+
+[tool.uv]
+package = false
+required-version = ">=0.10.0"
+conflicts = [
+    [
+        { extra = "cpu" },
+        { extra = "cuda" },
+        { extra = "rocm" },
+        { extra = "xpu" },
+    ],
+]
+
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cpu", extra = "cpu" },
+    { index = "pytorch-cu128", extra = "cuda", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+    { index = "pytorch-rocm64", extra = "rocm", marker = "sys_platform == 'linux'" },
+    { index = "pytorch-xpu", extra = "xpu", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+]
+pytorch-triton-rocm = [
+    { index = "pytorch-rocm64", extra = "rocm", marker = "sys_platform == 'linux'" },
+]
+pytorch-triton-xpu = [
+    { index = "pytorch-xpu", extra = "xpu", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-rocm64"
+url = "https://download.pytorch.org/whl/rocm6.4"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-xpu"
+url = "https://download.pytorch.org/whl/xpu"
+explicit = true
+
+[tool.uv.pip]
+torch-backend = "auto"

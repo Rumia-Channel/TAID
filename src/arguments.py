@@ -17,6 +17,28 @@ def parse_args():
         default="microsoft/Phi-3-mini-4k-instruct",
         help="teacher model path",
     )
+    parser.add_argument(
+        "--tokenizer_model",
+        type=str,
+        default=None,
+        help="tokenizer path (defaults to teacher model)",
+    )
+    parser.add_argument(
+        "--processor_model",
+        type=str,
+        default=None,
+        help="processor path for multimodal models (defaults to tokenizer or teacher model)",
+    )
+    parser.add_argument(
+        "--use_processor",
+        action="store_true",
+        help="load AutoProcessor instead of AutoTokenizer for multimodal models",
+    )
+    parser.add_argument(
+        "--trust_remote_code",
+        action="store_true",
+        help="allow transformers to load custom model or tokenizer code",
+    )
 
     # training args
     parser.add_argument(
@@ -25,6 +47,18 @@ def parse_args():
     parser.add_argument("--data_path", type=str, required=True, help="path to data dir")
     parser.add_argument("--num_epochs", type=int, default=5, help="number of epochs")
     parser.add_argument("--val_check_interval", type=float, default=1.0)
+    parser.add_argument(
+        "--limit_train_batches",
+        type=float,
+        default=1.0,
+        help="fraction or count of train batches per epoch",
+    )
+    parser.add_argument(
+        "--limit_val_batches",
+        type=float,
+        default=1.0,
+        help="fraction or count of validation batches",
+    )
     parser.add_argument("--accumulate_grad_batches", type=int, default=1)
     parser.add_argument(
         "--validate_first", action="store_true", help="run validation before training"
@@ -35,7 +69,49 @@ def parse_args():
     parser.add_argument(
         "--num_workers", type=int, default=4, help="number of workers for data loader"
     )
+    parser.add_argument(
+        "--max_input_len",
+        type=int,
+        default=1536,
+        help="maximum prompt length for batching",
+    )
+    parser.add_argument(
+        "--max_output_len",
+        type=int,
+        default=512,
+        help="maximum target response length for batching",
+    )
     parser.add_argument("--lr", type=float, default=1.0e-4, help="learning rate")
+    parser.add_argument(
+        "--accelerator",
+        type=str,
+        default="auto",
+        help="lightning accelerator (for example: auto, cuda, xpu, cpu)",
+    )
+    parser.add_argument(
+        "--devices",
+        type=str,
+        default="auto",
+        help="lightning devices value (for example: auto, 1, 0,1,2,3)",
+    )
+    parser.add_argument(
+        "--precision",
+        type=str,
+        default="bf16-mixed",
+        help="lightning precision mode",
+    )
+    parser.add_argument(
+        "--strategy",
+        type=str,
+        default="auto",
+        help="training strategy (for example: auto, ddp, deepspeed_stage_2)",
+    )
+    parser.add_argument(
+        "--attn_implementation",
+        type=str,
+        default="auto",
+        help="transformers attention implementation (for example: auto, sdpa, flash_attention_2)",
+    )
 
     # loss
     parser.add_argument("--loss_type", type=str, required=True, help="loss type")

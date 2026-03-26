@@ -164,3 +164,12 @@ cython_debug/
 /data
 lightning_logs
 logs
+
+# images
+*.jpg
+*.jpeg
+*.png
+!overview.png
+
+.cocoindex_code
+.tmp

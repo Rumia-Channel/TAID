@@ -3,9 +3,8 @@ from typing import Optional
 
 import torch
 import lightning as L
-from transformers import PreTrainedTokenizer, AutoTokenizer
 from litdata import StreamingDataset, StreamingDataLoader
-from src.utils import load_tokenizer
+from src.utils import load_preprocessor, get_text_tokenizer, get_pad_token_id
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
@@ -63,8 +62,9 @@ def _pad(
 
 
 class StreamingDataCollatorForLM:
-    def __init__(self, tokenizer: PreTrainedTokenizer, max_input_len, max_output_len):
-        self.tokenizer = tokenizer
+    def __init__(self, preprocessor, max_input_len, max_output_len):
+        self.preprocessor = preprocessor
+        self.tokenizer = get_text_tokenizer(preprocessor)
         self.max_input_len = max_input_len
         self.max_length = max_input_len + max_output_len
 
@@ -73,19 +73,24 @@ class StreamingDataCollatorForLM:
         keys = inputs[0].keys()
         for k in keys:
             if k == "input_ids":
-                pad_id = self.tokenizer.pad_token_id
+                pad_id = get_pad_token_id(self.preprocessor)
                 data[k] = _pad(inputs, k, max_length, pad_id, padding_side)
             elif k == "attention_mask":
+                pad_id = 0
+                data[k] = _pad(inputs, k, max_length, pad_id, padding_side)
+            elif k == "mm_token_type_ids":
                 pad_id = 0
                 data[k] = _pad(inputs, k, max_length, pad_id, padding_side)
             elif k == "labels":
                 pad_id = -100
                 data[k] = _pad(inputs, k, max_length, pad_id, padding_side)
+            elif k in ["pixel_values", "pixel_values_videos", "image_grid_thw", "video_grid_thw"]:
+                data[k] = torch.cat([d[k] for d in inputs], dim=0)
             else:
                 data[k] = [d[k] for d in inputs]
         if "attention_mask" not in data:
             data["attention_mask"] = (
-                data["input_ids"].ne(self.tokenizer.pad_token_id).long()
+                data["input_ids"].ne(get_pad_token_id(self.preprocessor)).long()
             )
         return data
 
@@ -113,6 +118,8 @@ class StreamingSFTDataModule(L.LightningDataModule):
         data_path: str,
         batch_size: int,
         num_workers: int,
+        trust_remote_code: bool = False,
+        use_processor: bool = False,
         eval_batch_size: Optional[int] = None,
         max_input_len: int = 1536,
         max_output_len: int = 512,
@@ -122,10 +129,15 @@ class StreamingSFTDataModule(L.LightningDataModule):
         self.batch_size = batch_size
         self.eval_batch_size = eval_batch_size if eval_batch_size else batch_size
         self.num_workers = num_workers
-        self.tokenizer = load_tokenizer(tokenizer_path)
+        self.preprocessor = load_preprocessor(
+            tokenizer_path,
+            use_processor=use_processor,
+            trust_remote_code=trust_remote_code,
+        )
+        self.tokenizer = get_text_tokenizer(self.preprocessor)
 
         self.collate_fn = StreamingDataCollatorForLM(
-            tokenizer=self.tokenizer,
+            preprocessor=self.preprocessor,
             max_input_len=max_input_len,
             max_output_len=max_output_len,
         )
