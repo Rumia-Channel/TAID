@@ -2,7 +2,12 @@ from typing import Dict, Any
 import torch
 from torch import Tensor
 import lightning as L
-from transformers import get_scheduler, GenerationConfig, AutoModelForCausalLM
+from transformers import (
+    get_scheduler,
+    GenerationConfig,
+    AutoModelForCausalLM,
+    AutoModelForImageTextToText,
+)
 from src.metrics import compute_metrics
 from src.loss import get_loss_fn, LossOutput
 from src.sampler import get_sampler
@@ -12,6 +17,9 @@ from src.utils import (
     get_generated_ids,
     get_optimizer_params,
     normalize_chat_text,
+    get_text_tokenizer,
+    get_pad_token_id,
+    get_eos_token_id,
 )
 
 
@@ -20,10 +28,10 @@ def initialize_generation_config(tokenizer, generation_config):
     generation_config = GenerationConfig(**generation_config)
     generation_config.return_dict_in_generate = False
     if not generation_config.eos_token_id:
-        generation_config.eos_token_id = tokenizer.eos_token_id
+        generation_config.eos_token_id = get_eos_token_id(tokenizer)
     if not generation_config.pad_token_id:
         generation_config.pad_token_id = default(
-            tokenizer.pad_token_id, tokenizer.eos_token_id
+            get_pad_token_id(tokenizer), get_eos_token_id(tokenizer)
         )
     return generation_config
 
@@ -45,7 +53,7 @@ def resolve_attn_implementation(requested: str) -> str:
 
 
 class KDForLM(L.LightningModule):
-    def __init__(self, args, tokenizer, generation_config=None):
+    def __init__(self, args, preprocessor, generation_config=None):
         super().__init__()
         self.student_model = None
         self.teacher_model = None
@@ -55,7 +63,8 @@ class KDForLM(L.LightningModule):
             generation_config,
             {"do_sample": False, "num_beams": 1, "max_new_tokens": 512},
         )
-        self.tokenizer = tokenizer
+        self.preprocessor = preprocessor
+        self.tokenizer = get_text_tokenizer(preprocessor)
         self.args = args
         self.validation_step_outputs = {}
 
@@ -68,17 +77,25 @@ class KDForLM(L.LightningModule):
             "attn_implementation": attn_implementation,
             "trust_remote_code": self.args.trust_remote_code,
         }
+        model_cls = (
+            AutoModelForImageTextToText
+            if self.args.use_processor
+            else AutoModelForCausalLM
+        )
         self.print(f"Using attention implementation: {attn_implementation}")
-        self.student_model = AutoModelForCausalLM.from_pretrained(
+        self.student_model = model_cls.from_pretrained(
             self.args.student_model,
             **model_kwargs,
         )
-        self.student_model.resize_token_embeddings(len(self.tokenizer))
-        self.teacher_model = AutoModelForCausalLM.from_pretrained(
+        self.teacher_model = model_cls.from_pretrained(
             self.args.teacher_model,
             **model_kwargs,
         )
-        self.teacher_model.resize_token_embeddings(len(self.tokenizer))
+        vocab_size = len(self.tokenizer)
+        if self.student_model.get_input_embeddings().num_embeddings != vocab_size:
+            self.student_model.resize_token_embeddings(vocab_size)
+        if self.teacher_model.get_input_embeddings().num_embeddings != vocab_size:
+            self.teacher_model.resize_token_embeddings(vocab_size)
 
     def forward(self, batch: Dict[str, Tensor], **kwargs) -> LossOutput:
         outputs: LossOutput = self.loss_fn(lightning_module=self, batch=batch, **kwargs)
@@ -97,7 +114,7 @@ class KDForLM(L.LightningModule):
 
     def get_num_tokens(self, batch) -> int:
         return torch.sum(
-            batch["model_inputs"]["input_ids"] != self.tokenizer.pad_token_id
+            batch["model_inputs"]["input_ids"] != get_pad_token_id(self.preprocessor)
         )
 
     def sampling(self, batch):
@@ -106,7 +123,7 @@ class KDForLM(L.LightningModule):
         assert "model_inputs_gen" in batch
         # data generation from student model
         generation_config = initialize_generation_config(
-            self.tokenizer, self.generation_config
+            self.preprocessor, self.generation_config
         )
         batch = self.sampler(
             self,
@@ -135,7 +152,7 @@ class KDForLM(L.LightningModule):
         )
         response = model_inputs_gen.pop("response")
         generation_config = initialize_generation_config(
-            self.tokenizer, self.generation_config
+            self.preprocessor, self.generation_config
         )
         # generate
         generated_ids = self.student_model.generate(

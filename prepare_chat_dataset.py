@@ -3,10 +3,11 @@ import os
 import re
 from functools import partial
 
+import torch
 from datasets import load_dataset
 from litdata import optimize
 
-from src.utils import load_tokenizer
+from src.utils import load_preprocessor, get_text_tokenizer
 
 MODELS = {
     "phi-3": "microsoft/Phi-3-mini-4k-instruct",
@@ -84,13 +85,18 @@ def placeholder_for_modality(modality):
     return MODALITY_PLACEHOLDERS.get(base, f"[{base.upper()}]")
 
 
-def normalize_content_for_template(content, multimodal_mode):
+def normalize_content_for_template(content, multimodal_mode, use_processor=False):
     if content is None:
-        return ""
+        return [] if use_processor and multimodal_mode == "preserve" else ""
     if isinstance(content, str):
+        if use_processor and multimodal_mode == "preserve":
+            return [{"type": "text", "text": content}]
         return content
     if not isinstance(content, list):
-        return str(content)
+        content = str(content)
+        if use_processor and multimodal_mode == "preserve":
+            return [{"type": "text", "text": content}]
+        return content
 
     if multimodal_mode == "preserve":
         normalized = []
@@ -127,10 +133,14 @@ def normalize_content_for_template(content, multimodal_mode):
     return "".join(text_parts)
 
 
-def render_content_text(content, multimodal_mode, enable_thinking):
+def render_content_text(content, multimodal_mode, enable_thinking, use_processor=False):
     if isinstance(content, str):
         return maybe_strip_thinking_text(content, enable_thinking)
-    rendered = normalize_content_for_template(content, multimodal_mode)
+    rendered = normalize_content_for_template(
+        content,
+        multimodal_mode,
+        use_processor=use_processor,
+    )
     if isinstance(rendered, list):
         text_parts = []
         for item in rendered:
@@ -143,44 +153,75 @@ def render_content_text(content, multimodal_mode, enable_thinking):
     return maybe_strip_thinking_text(str(rendered), enable_thinking)
 
 
-def apply_chat_template(tokenizer, messages, add_generation_prompt, enable_thinking):
+def apply_chat_template(preprocessor, messages, add_generation_prompt, enable_thinking):
     template_kwargs = {
         "tokenize": False,
         "add_generation_prompt": add_generation_prompt,
     }
     if enable_thinking != "auto":
         template_kwargs["enable_thinking"] = enable_thinking == "true"
-    rendered = tokenizer.apply_chat_template(messages, **template_kwargs)
+    rendered = preprocessor.apply_chat_template(messages, **template_kwargs)
     return maybe_strip_thinking_text(rendered, enable_thinking)
 
 
-def build_chat_pair(messages, tokenizer, multimodal_mode, enable_thinking):
+def collect_visual_inputs(messages):
+    images = []
+    videos = []
+    for message in messages:
+        content = message.get("content")
+        if not isinstance(content, list):
+            continue
+        for item in content:
+            if not isinstance(item, dict):
+                continue
+            modality = infer_modality(item)
+            if modality.startswith("image"):
+                image = item.get("image") or item.get("image_url")
+                if image is not None:
+                    images.append(image)
+            elif modality.startswith("video"):
+                video = item.get("video") or item.get("video_url")
+                if video is not None:
+                    videos.append(video)
+    return images or None, videos or None
+
+
+def build_chat_pair(messages, preprocessor, multimodal_mode, enable_thinking):
     if messages[-1]["role"] != "assistant":
         raise ValueError("The last message must be from the assistant.")
 
     prompt_text = apply_chat_template(
-        tokenizer,
+        preprocessor,
         messages[:-1],
         add_generation_prompt=True,
         enable_thinking=enable_thinking,
     )
     full_text = apply_chat_template(
-        tokenizer,
+        preprocessor,
         messages,
         add_generation_prompt=False,
         enable_thinking=enable_thinking,
     )
     response_text = render_content_text(
-        messages[-1]["content"], multimodal_mode, enable_thinking
+        messages[-1]["content"],
+        multimodal_mode,
+        enable_thinking,
+        use_processor=hasattr(preprocessor, "tokenizer"),
     )
     return prompt_text, full_text, response_text
 
 
+def sequence_length(value):
+    if hasattr(value, "size"):
+        return value.size(-1)
+    return len(value)
+
+
 def fits_length(example, tokenizer, max_input_len, max_output_len):
     max_length = max_input_len + max_output_len
-    if len(example["model_inputs"]["input_ids"]) > max_length:
+    if sequence_length(example["model_inputs"]["input_ids"]) > max_length:
         return False
-    if len(example["model_inputs_gen"]["input_ids"]) > max_input_len:
+    if sequence_length(example["model_inputs_gen"]["input_ids"]) > max_input_len:
         return False
     output_tokens = tokenizer(example["response"]).input_ids
     if len(output_tokens) > max_output_len:
@@ -188,18 +229,44 @@ def fits_length(example, tokenizer, max_input_len, max_output_len):
     return True
 
 
-def build_training_example(messages, tokenizer, multimodal_mode, enable_thinking):
+def build_training_example(messages, preprocessor, multimodal_mode, enable_thinking):
     input_text, text, output_text = build_chat_pair(
         messages,
-        tokenizer,
+        preprocessor,
         multimodal_mode=multimodal_mode,
         enable_thinking=enable_thinking,
     )
-    input_ids = tokenizer(text).input_ids
-    gen_input_ids = tokenizer(input_text).input_ids
+    tokenizer = get_text_tokenizer(preprocessor)
+    if hasattr(preprocessor, "tokenizer"):
+        prompt_images, prompt_videos = collect_visual_inputs(messages[:-1])
+        full_images, full_videos = collect_visual_inputs(messages)
+        model_inputs = preprocessor(
+            text=[text],
+            images=full_images,
+            videos=full_videos,
+            return_tensors="pt",
+            padding=True,
+        )
+        model_inputs_gen = preprocessor(
+            text=[input_text],
+            images=prompt_images,
+            videos=prompt_videos,
+            return_tensors="pt",
+            padding=True,
+        )
+    else:
+        input_ids = tokenizer(text).input_ids
+        gen_input_ids = tokenizer(input_text).input_ids
+        model_inputs = {"input_ids": input_ids}
+        model_inputs_gen = {"input_ids": gen_input_ids}
+
+    if "input_ids" in model_inputs and hasattr(model_inputs["input_ids"], "clone"):
+        model_inputs["labels"] = model_inputs["input_ids"].clone()
+    else:
+        model_inputs["labels"] = list(model_inputs["input_ids"])
     return {
-        "model_inputs": {"input_ids": input_ids, "labels": list(input_ids)},
-        "model_inputs_gen": {"input_ids": gen_input_ids},
+        "model_inputs": model_inputs,
+        "model_inputs_gen": model_inputs_gen,
         "response": output_text,
     }
 
@@ -209,23 +276,55 @@ def truncate_prompt_window(example, tokenizer, max_input_len, max_output_len):
     if len(output_ids) > max_output_len:
         return None
 
-    prompt_ids = example["model_inputs_gen"]["input_ids"][-max_input_len:]
+    prompt_ids = example["model_inputs_gen"]["input_ids"]
     full_ids = example["model_inputs"]["input_ids"]
-    if output_ids and full_ids[-len(output_ids) :] == output_ids:
-        full_ids = prompt_ids + output_ids
+    if hasattr(prompt_ids, "size"):
+        prompt_ids = prompt_ids[:, -max_input_len:]
+        output_tensor = full_ids.new_tensor(output_ids)
+        if output_ids and torch.equal(full_ids[0, -len(output_ids) :], output_tensor):
+            full_ids = torch.cat([prompt_ids, output_tensor.unsqueeze(0)], dim=-1)
+        else:
+            full_ids = full_ids[:, -(prompt_ids.size(-1) + len(output_ids)) :]
+        model_inputs = {}
+        for key, value in example["model_inputs"].items():
+            if key == "input_ids":
+                model_inputs[key] = full_ids
+            elif key == "labels":
+                model_inputs[key] = full_ids.clone()
+            elif key in ["attention_mask", "mm_token_type_ids"]:
+                tail = prompt_ids.size(-1) + len(output_ids)
+                model_inputs[key] = value[:, -tail:]
+                if key == "attention_mask":
+                    model_inputs[key] = full_ids.ne(tokenizer.pad_token_id).long()
+            else:
+                model_inputs[key] = value
+        model_inputs_gen = {}
+        for key, value in example["model_inputs_gen"].items():
+            if key in ["input_ids", "attention_mask", "mm_token_type_ids"]:
+                model_inputs_gen[key] = value[:, -prompt_ids.size(-1) :]
+                if key == "attention_mask":
+                    model_inputs_gen[key] = prompt_ids.ne(tokenizer.pad_token_id).long()
+            else:
+                model_inputs_gen[key] = value
     else:
-        full_ids = full_ids[-(len(prompt_ids) + len(output_ids)) :]
+        prompt_ids = prompt_ids[-max_input_len:]
+        if output_ids and full_ids[-len(output_ids) :] == output_ids:
+            full_ids = prompt_ids + output_ids
+        else:
+            full_ids = full_ids[-(len(prompt_ids) + len(output_ids)) :]
+        model_inputs = {"input_ids": full_ids, "labels": list(full_ids)}
+        model_inputs_gen = {"input_ids": prompt_ids}
 
     return {
-        "model_inputs": {"input_ids": full_ids, "labels": list(full_ids)},
-        "model_inputs_gen": {"input_ids": prompt_ids},
+        "model_inputs": model_inputs,
+        "model_inputs_gen": model_inputs_gen,
         "response": example["response"],
     }
 
 
 def iter_windowed_examples(
     messages,
-    tokenizer,
+    preprocessor,
     max_input_len,
     max_output_len,
     multimodal_mode,
@@ -234,6 +333,7 @@ def iter_windowed_examples(
     if not messages:
         return []
 
+    tokenizer = get_text_tokenizer(preprocessor)
     system_prefix = [messages[0]] if messages[0]["role"] == "system" else []
     body = messages[len(system_prefix) :]
     samples = []
@@ -252,7 +352,7 @@ def iter_windowed_examples(
             window_messages = system_prefix + body[start_idx : end_idx + 1]
             example = build_training_example(
                 window_messages,
-                tokenizer,
+                preprocessor,
                 multimodal_mode=multimodal_mode,
                 enable_thinking=enable_thinking,
             )
@@ -267,7 +367,7 @@ def iter_windowed_examples(
         window_messages = system_prefix + body[start_candidates[-1] : end_idx + 1]
         example = build_training_example(
             window_messages,
-            tokenizer,
+            preprocessor,
             multimodal_mode=multimodal_mode,
             enable_thinking=enable_thinking,
         )
@@ -322,7 +422,9 @@ def normalize_message_list(messages, args, role_field, content_field):
             {
                 "role": canonicalize_role(message[role_field]),
                 "content": normalize_content_for_template(
-                    message.get(content_field), args.multimodal_mode
+                    message.get(content_field),
+                    args.multimodal_mode,
+                    use_processor=args.use_processor,
                 ),
             }
         )
@@ -340,6 +442,7 @@ def normalize_sharegpt(messages, args):
                 "content": normalize_content_for_template(
                     message.get(args.sharegpt_content_field),
                     args.multimodal_mode,
+                    use_processor=args.use_processor,
                 ),
             }
         )
@@ -384,7 +487,9 @@ def normalize_example(example, args):
                 {
                     "role": "system",
                     "content": normalize_content_for_template(
-                        example.get(args.system_column), args.multimodal_mode
+                        example.get(args.system_column),
+                        args.multimodal_mode,
+                        use_processor=args.use_processor,
                     ),
                 }
             )
@@ -395,12 +500,23 @@ def normalize_example(example, args):
             example.get(instruction_column),
             example.get(input_column),
         )
-        messages.append({"role": "user", "content": user_text})
+        messages.append(
+            {
+                "role": "user",
+                "content": normalize_content_for_template(
+                    user_text,
+                    args.multimodal_mode,
+                    use_processor=args.use_processor,
+                ),
+            }
+        )
         messages.append(
             {
                 "role": "assistant",
                 "content": normalize_content_for_template(
-                    example.get(output_column), args.multimodal_mode
+                    example.get(output_column),
+                    args.multimodal_mode,
+                    use_processor=args.use_processor,
                 ),
             }
         )
@@ -420,7 +536,9 @@ def normalize_example(example, args):
                 {
                     "role": "system",
                     "content": normalize_content_for_template(
-                        example.get(args.system_column), args.multimodal_mode
+                        example.get(args.system_column),
+                        args.multimodal_mode,
+                        use_processor=args.use_processor,
                     ),
                 }
             )
@@ -428,7 +546,9 @@ def normalize_example(example, args):
             {
                 "role": "user",
                 "content": normalize_content_for_template(
-                    example.get(prompt_column), args.multimodal_mode
+                    example.get(prompt_column),
+                    args.multimodal_mode,
+                    use_processor=args.use_processor,
                 ),
             }
         )
@@ -436,7 +556,9 @@ def normalize_example(example, args):
             {
                 "role": "assistant",
                 "content": normalize_content_for_template(
-                    example.get(response_column), args.multimodal_mode
+                    example.get(response_column),
+                    args.multimodal_mode,
+                    use_processor=args.use_processor,
                 ),
             }
         )
@@ -444,7 +566,7 @@ def normalize_example(example, args):
     raise ValueError(f"Unsupported input format: {input_format}")
 
 
-def tokenize_batch(batch, tokenizer, args):
+def tokenize_batch(batch, preprocessor, args):
     batch_size = len(next(iter(batch.values()))) if batch else 0
     results = {"model_inputs": [], "model_inputs_gen": [], "response": []}
     max_input_len = args.max_length - args.max_output_length
@@ -454,7 +576,7 @@ def tokenize_batch(batch, tokenizer, args):
         messages = normalize_example(example, args)
         for sample in iter_windowed_examples(
             messages,
-            tokenizer,
+            preprocessor,
             max_input_len=max_input_len,
             max_output_len=args.max_output_length,
             multimodal_mode=args.multimodal_mode,
@@ -516,13 +638,13 @@ def resolve_eval_size(length, args):
     return min(ratio_size, max(1, length - 1))
 
 
-def prepare_split(dataset, tokenizer, args, output_subdir, num_workers):
+def prepare_split(dataset, preprocessor, args, output_subdir, num_workers):
     column_names = list(dataset.features)
     dataset = dataset.map(
         tokenize_batch,
         batched=True,
         batch_size=args.map_batch_size,
-        fn_kwargs={"tokenizer": tokenizer, "args": args},
+        fn_kwargs={"preprocessor": preprocessor, "args": args},
         num_proc=resolve_num_proc(args.num_proc),
         desc=f"Applying chat templates ({output_subdir})",
         remove_columns=column_names,
@@ -608,6 +730,11 @@ def parse_args():
         default=None,
         help="tokenizer/model path override used for chat templating",
     )
+    parser.add_argument(
+        "--use_processor",
+        action="store_true",
+        help="use AutoProcessor for native multimodal models",
+    )
     parser.add_argument("--output_dir", type=str, default="data")
     parser.add_argument(
         "--output_name",
@@ -655,8 +782,9 @@ def parse_args():
 if __name__ == "__main__":
     args = parse_args()
     tokenizer_path = args.tokenizer_name or MODELS[args.model_type]
-    tokenizer = load_tokenizer(
+    preprocessor = load_preprocessor(
         tokenizer_path,
+        use_processor=args.use_processor,
         trust_remote_code=args.trust_remote_code,
     )
 
@@ -678,14 +806,14 @@ if __name__ == "__main__":
     os.makedirs(output_root, exist_ok=True)
     prepare_split(
         train_dataset,
-        tokenizer,
+        preprocessor,
         args,
         output_subdir="train",
         num_workers=args.train_optimize_workers,
     )
     prepare_split(
         eval_dataset,
-        tokenizer,
+        preprocessor,
         args,
         output_subdir="test",
         num_workers=args.eval_optimize_workers,

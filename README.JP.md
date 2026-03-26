@@ -65,12 +65,13 @@ uv run python prepare_chat_dataset.py \
   --input_format messages \
   --messages_column messages \
   --model_type qwen3.5 \
+  --use_processor \
   --output_name custom-qwen3.5 \
   --multimodal_mode preserve \
   --enable_thinking false
 ```
 
-`multimodal_mode=preserve` は chat template が出す modality token を保持します。現状の学習器自体は text-only なので、画像 tensor そのものではなく特殊 token を残す挙動です。
+`--use_processor` と `multimodal_mode=preserve` を併用すると、Qwen3.5 のようなネイティブ multimodal processor で `pixel_values` などの画像 tensor まで前計算できます。なお `--sampling_type` はまだ text-only 前提なので、multimodal バッチでは未指定にしてください。
 
 ## 学習
 
@@ -102,6 +103,19 @@ uv run python train.py \
   --loss_type taid
 ```
 
+ネイティブ multimodal Qwen3.5 の例:
+
+```bash
+uv run python train.py \
+  --teacher_model Qwen/Qwen3.5-2B \
+  --student_model Qwen/Qwen3.5-2B \
+  --processor_model Qwen/Qwen3.5-2B \
+  --use_processor \
+  --data_path data/custom-qwen3.5 \
+  --output_dir logs/qwen3.5-mm-taid \
+  --loss_type taid
+```
+
 主な可搬性関連フラグ:
 
 - `--accelerator auto|cuda|xpu|cpu`
@@ -109,6 +123,7 @@ uv run python train.py \
 - `--strategy auto|ddp|deepspeed_stage_2`
 - `--attn_implementation auto|sdpa|flash_attention_2`
 - `--tokenizer_model <hf-repo-or-local-path>`: tokenizer を teacher と分けたい場合
+- `--processor_model <hf-repo-or-local-path>` と `--use_processor`: ネイティブ multimodal モデルを使う場合
 - `--trust_remote_code`: 独自 HF 実装を使うモデル系を読み込む場合
 
 ## 謝辞

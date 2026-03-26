@@ -24,6 +24,17 @@ def parse_args():
         help="tokenizer path (defaults to teacher model)",
     )
     parser.add_argument(
+        "--processor_model",
+        type=str,
+        default=None,
+        help="processor path for multimodal models (defaults to tokenizer or teacher model)",
+    )
+    parser.add_argument(
+        "--use_processor",
+        action="store_true",
+        help="load AutoProcessor instead of AutoTokenizer for multimodal models",
+    )
+    parser.add_argument(
         "--trust_remote_code",
         action="store_true",
         help="allow transformers to load custom model or tokenizer code",

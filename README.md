@@ -65,12 +65,13 @@ uv run python prepare_chat_dataset.py \
   --input_format messages \
   --messages_column messages \
   --model_type qwen3.5 \
+  --use_processor \
   --output_name custom-qwen3.5 \
   --multimodal_mode preserve \
   --enable_thinking false
 ```
 
-`multimodal_mode=preserve` keeps modality markers emitted by the chat template. The current training stack is still text-only, so this preserves modality tokens rather than image tensors.
+With `--use_processor` and `multimodal_mode=preserve`, native multimodal processors such as Qwen3.5 can precompute `pixel_values` and related vision tensors for training. `--sampling_type` is still text-only and should be left unset for multimodal batches.
 
 ## Training
 
@@ -102,6 +103,19 @@ uv run python train.py \
   --loss_type taid
 ```
 
+Native multimodal Qwen3.5 example:
+
+```bash
+uv run python train.py \
+  --teacher_model Qwen/Qwen3.5-2B \
+  --student_model Qwen/Qwen3.5-2B \
+  --processor_model Qwen/Qwen3.5-2B \
+  --use_processor \
+  --data_path data/custom-qwen3.5 \
+  --output_dir logs/qwen3.5-mm-taid \
+  --loss_type taid
+```
+
 Relevant portability flags:
 
 - `--accelerator auto|cuda|xpu|cpu`
@@ -109,6 +123,7 @@ Relevant portability flags:
 - `--strategy auto|ddp|deepspeed_stage_2`
 - `--attn_implementation auto|sdpa|flash_attention_2`
 - `--tokenizer_model <hf-repo-or-local-path>` when the tokenizer should differ from the teacher
+- `--processor_model <hf-repo-or-local-path>` and `--use_processor` for native multimodal models
 - `--trust_remote_code` for model families that still ship custom HF integrations
 
 ## Acknowledgement

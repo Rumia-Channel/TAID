@@ -7,7 +7,7 @@ import torch
 from torch import nn
 from transformers import GenerationConfig
 from lightning import LightningModule
-from src.utils import default
+from src.utils import default, get_pad_token_id
 
 
 class ReplayBuffer:
@@ -127,9 +127,7 @@ class SampleGenerator(nn.Module):
 
     def get_model_inputs_gen(self, batch):
         gen_data = batch.get("model_inputs_gen")
-        gen_data = {
-            k: v for k, v in gen_data.items() if k in ["input_ids", "attention_mask"]
-        }
+        gen_data = {k: v for k, v in gen_data.items() if k != "response"}
         return gen_data
 
     @torch.no_grad()
@@ -150,18 +148,22 @@ class SampleGenerator(nn.Module):
             samp_threshold = self.adaptive_threshold * (1 - global_step / total_iters)
 
         model_batch = None
+        gen_data = self.get_model_inputs_gen(batch)
+        if "pixel_values" in gen_data or "pixel_values_videos" in gen_data:
+            raise NotImplementedError(
+                "sampling_type is not supported for multimodal batches yet. Disable --sampling_type when using image inputs."
+            )
         # data generation from student models
         if not lightning_module.training:
             # no sampling during eval
             model_batch = None
         elif self.sampling_type == "mixed" and r < self.mixed_alpha:
-            gen_data = self.get_model_inputs_gen(batch)
             bsz = gen_data["input_ids"].size(0)
 
             model_batch = run_sample(
                 lightning_module.student_model,
                 gen_data,
-                pad_token_id=lightning_module.tokenizer.pad_token_id,
+                pad_token_id=get_pad_token_id(lightning_module.preprocessor),
                 generation_config=generation_config,
             )
             self.replay_buffer.move_to_memory(model_batch)
@@ -174,19 +176,17 @@ class SampleGenerator(nn.Module):
             r < samp_threshold
             or (r < self.adaptive_threshold and len(self.replay_buffer) < self.capacity)
         ):
-            gen_data = self.get_model_inputs_gen(batch)
             bsz = gen_data["input_ids"].size(0)
 
             model_batch = run_sample(
                 lightning_module.student_model,
                 gen_data,
-                pad_token_id=lightning_module.tokenizer.pad_token_id,
+                pad_token_id=get_pad_token_id(lightning_module.preprocessor),
                 generation_config=generation_config,
             )
             self.replay_buffer.move_to_memory(model_batch)
 
         elif self.sampling_type == "adaptive" and r < self.adaptive_threshold:
-            gen_data = self.get_model_inputs_gen(batch)
             bsz = gen_data["input_ids"].size(0)
             model_batch = self.replay_buffer.sample(bsz)
             model_batch = self.replay_buffer.move_to_device(

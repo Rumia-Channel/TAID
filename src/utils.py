@@ -8,7 +8,7 @@ from natsort import natsorted
 
 import torch
 from torch import nn
-from transformers import AutoTokenizer, AutoConfig, AutoModelForCausalLM
+from transformers import AutoTokenizer, AutoProcessor, AutoConfig, AutoModelForCausalLM
 from safetensors.torch import load_file as load_safetensors
 
 
@@ -29,6 +29,20 @@ def flatten_list(x):
 def normalize_chat_text(text: str) -> str:
     text = re.sub(r"<think>\s*.*?\s*</think>\s*", "", text, flags=re.DOTALL)
     return text.strip()
+
+
+def get_text_tokenizer(preprocessor):
+    return preprocessor.tokenizer if hasattr(preprocessor, "tokenizer") else preprocessor
+
+
+def get_pad_token_id(preprocessor):
+    tokenizer = get_text_tokenizer(preprocessor)
+    return tokenizer.pad_token_id
+
+
+def get_eos_token_id(preprocessor):
+    tokenizer = get_text_tokenizer(preprocessor)
+    return tokenizer.eos_token_id
 
 
 def get_generated_ids(generated_ids: torch.Tensor, input_ids: torch.Tensor):
@@ -115,6 +129,27 @@ def load_tokenizer(tokenizer_path: str, **tokenizer_kwargs):
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     return tokenizer
+
+
+def load_preprocessor(
+    preprocessor_path: str,
+    use_processor: bool = False,
+    **preprocessor_kwargs,
+):
+    if not use_processor:
+        return load_tokenizer(preprocessor_path, **preprocessor_kwargs)
+
+    processor = AutoProcessor.from_pretrained(preprocessor_path, **preprocessor_kwargs)
+    tokenizer = get_text_tokenizer(processor)
+    tokenizer_name = preprocessor_path.lower()
+    if "phi-3" in tokenizer_name:
+        tokenizer.pad_token = "<unk>"
+        tokenizer.padding_side = "right"
+    if "qwen" in tokenizer_name and tokenizer.padding_side != "right":
+        tokenizer.padding_side = "right"
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    return processor
 
 
 def get_best_checkpoint_name(logdir):
