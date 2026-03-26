@@ -13,10 +13,10 @@ from src.loss import get_loss_fn, LossOutput
 from src.sampler import get_sampler
 from src.utils import (
     default,
+    decode_generated_texts,
     flatten_list,
     get_generated_ids,
     get_optimizer_params,
-    normalize_chat_text,
     get_text_tokenizer,
     get_pad_token_id,
     get_eos_token_id,
@@ -162,10 +162,7 @@ class KDForLM(L.LightningModule):
         )
         # extract generated ids
         generated_ids = get_generated_ids(generated_ids, model_inputs_gen["input_ids"])
-        generated_answers = self.tokenizer.batch_decode(
-            generated_ids, skip_special_tokens=True
-        )
-        generated_answers = [normalize_chat_text(answer) for answer in generated_answers]
+        generated_answers = decode_generated_texts(self.preprocessor, generated_ids)
         return generated_answers, response
 
     def _compute_metric(self, outputs, step="val"):

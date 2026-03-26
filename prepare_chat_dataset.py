@@ -7,13 +7,19 @@ import torch
 from datasets import load_dataset
 from litdata import optimize
 
-from src.utils import load_preprocessor, get_text_tokenizer
+from src.utils import (
+    load_preprocessor,
+    get_text_tokenizer,
+    is_gpt_oss_preprocessor,
+)
 
 MODELS = {
     "phi-3": "microsoft/Phi-3-mini-4k-instruct",
     "llama-2": "meta-llama/Llama-2-7b-chat-hf",
     "stablelm": "stabilityai/stablelm-zephyr-3b",
     "qwen3.5": "Qwen/Qwen3.5-9B",
+    "gpt-oss-20b": "openai/gpt-oss-20b",
+    "gpt-oss-120b": "openai/gpt-oss-120b",
 }
 MAX_LENGTH = 2048
 MAX_OUTPUT_LENGTH = 512
@@ -33,7 +39,7 @@ ROLE_ALIASES = {
     "tool": "tool",
     "function": "tool",
     "system": "system",
-    "developer": "system",
+    "developer": "developer",
     "user": "user",
     "human": "user",
 }
@@ -56,11 +62,18 @@ def maybe_strip_thinking_text(text: str, enable_thinking: str) -> str:
     return text
 
 
-def canonicalize_role(raw_role):
+def canonicalize_role(raw_role, preserve_developer=False):
     role = str(raw_role).strip().lower()
     if role not in ROLE_ALIASES:
         raise ValueError(f"Unsupported role: {raw_role}")
+    if role == "developer" and not preserve_developer:
+        return "system"
     return ROLE_ALIASES[role]
+
+
+def supports_developer_role(args):
+    selected = str(args.tokenizer_name or args.model_type or "").lower()
+    return "gpt-oss" in selected
 
 
 def infer_modality(item):
@@ -153,12 +166,21 @@ def render_content_text(content, multimodal_mode, enable_thinking, use_processor
     return maybe_strip_thinking_text(str(rendered), enable_thinking)
 
 
-def apply_chat_template(preprocessor, messages, add_generation_prompt, enable_thinking):
+def apply_chat_template(
+    preprocessor,
+    messages,
+    add_generation_prompt,
+    enable_thinking,
+    reasoning_effort,
+):
     template_kwargs = {
         "tokenize": False,
         "add_generation_prompt": add_generation_prompt,
     }
-    if enable_thinking != "auto":
+    if is_gpt_oss_preprocessor(preprocessor):
+        if reasoning_effort != "auto":
+            template_kwargs["reasoning_effort"] = reasoning_effort
+    elif enable_thinking != "auto":
         template_kwargs["enable_thinking"] = enable_thinking == "true"
     rendered = preprocessor.apply_chat_template(messages, **template_kwargs)
     return maybe_strip_thinking_text(rendered, enable_thinking)
@@ -186,7 +208,54 @@ def collect_visual_inputs(messages):
     return images or None, videos or None
 
 
-def build_chat_pair(messages, preprocessor, multimodal_mode, enable_thinking):
+def prepare_messages_for_template(
+    messages,
+    preprocessor,
+    multimodal_mode,
+    enable_thinking,
+):
+    if not is_gpt_oss_preprocessor(preprocessor):
+        return messages
+
+    prefix = []
+    index = 0
+    while index < len(messages) and messages[index]["role"] in {"system", "developer"}:
+        prefix.append(messages[index])
+        index += 1
+
+    if not prefix:
+        return messages
+
+    content_parts = []
+    for message in prefix:
+        rendered = render_content_text(
+            message["content"],
+            multimodal_mode,
+            enable_thinking,
+            use_processor=hasattr(preprocessor, "tokenizer"),
+        )
+        if rendered:
+            content_parts.append(rendered)
+    merged_content = "\n\n".join(content_parts)
+    if not merged_content:
+        return messages[index:]
+
+    return [{"role": "developer", "content": merged_content}, *messages[index:]]
+
+
+def build_chat_pair(
+    messages,
+    preprocessor,
+    multimodal_mode,
+    enable_thinking,
+    reasoning_effort,
+):
+    messages = prepare_messages_for_template(
+        messages,
+        preprocessor,
+        multimodal_mode,
+        enable_thinking,
+    )
     if messages[-1]["role"] != "assistant":
         raise ValueError("The last message must be from the assistant.")
 
@@ -195,12 +264,14 @@ def build_chat_pair(messages, preprocessor, multimodal_mode, enable_thinking):
         messages[:-1],
         add_generation_prompt=True,
         enable_thinking=enable_thinking,
+        reasoning_effort=reasoning_effort,
     )
     full_text = apply_chat_template(
         preprocessor,
         messages,
         add_generation_prompt=False,
         enable_thinking=enable_thinking,
+        reasoning_effort=reasoning_effort,
     )
     response_text = render_content_text(
         messages[-1]["content"],
@@ -229,12 +300,19 @@ def fits_length(example, tokenizer, max_input_len, max_output_len):
     return True
 
 
-def build_training_example(messages, preprocessor, multimodal_mode, enable_thinking):
+def build_training_example(
+    messages,
+    preprocessor,
+    multimodal_mode,
+    enable_thinking,
+    reasoning_effort,
+):
     input_text, text, output_text = build_chat_pair(
         messages,
         preprocessor,
         multimodal_mode=multimodal_mode,
         enable_thinking=enable_thinking,
+        reasoning_effort=reasoning_effort,
     )
     tokenizer = get_text_tokenizer(preprocessor)
     if hasattr(preprocessor, "tokenizer"):
@@ -329,13 +407,18 @@ def iter_windowed_examples(
     max_output_len,
     multimodal_mode,
     enable_thinking,
+    reasoning_effort,
 ):
     if not messages:
         return []
 
     tokenizer = get_text_tokenizer(preprocessor)
-    system_prefix = [messages[0]] if messages[0]["role"] == "system" else []
-    body = messages[len(system_prefix) :]
+    prefix = []
+    for message in messages:
+        if message["role"] not in {"system", "developer"}:
+            break
+        prefix.append(message)
+    body = messages[len(prefix) :]
     samples = []
 
     for end_idx, message in enumerate(body):
@@ -349,12 +432,13 @@ def iter_windowed_examples(
 
         matched = False
         for start_idx in start_candidates:
-            window_messages = system_prefix + body[start_idx : end_idx + 1]
+            window_messages = prefix + body[start_idx : end_idx + 1]
             example = build_training_example(
                 window_messages,
                 preprocessor,
                 multimodal_mode=multimodal_mode,
                 enable_thinking=enable_thinking,
+                reasoning_effort=reasoning_effort,
             )
             if fits_length(example, tokenizer, max_input_len, max_output_len):
                 samples.append(example)
@@ -364,12 +448,13 @@ def iter_windowed_examples(
         if matched:
             continue
 
-        window_messages = system_prefix + body[start_candidates[-1] : end_idx + 1]
+        window_messages = prefix + body[start_candidates[-1] : end_idx + 1]
         example = build_training_example(
             window_messages,
             preprocessor,
             multimodal_mode=multimodal_mode,
             enable_thinking=enable_thinking,
+            reasoning_effort=reasoning_effort,
         )
         example = truncate_prompt_window(
             example, tokenizer, max_input_len, max_output_len
@@ -415,12 +500,16 @@ def detect_input_format(example, args):
 
 def normalize_message_list(messages, args, role_field, content_field):
     normalized = []
+    preserve_developer = supports_developer_role(args)
     for message in messages:
         if not isinstance(message, dict):
             raise TypeError(f"Unsupported message type: {type(message)}")
         normalized.append(
             {
-                "role": canonicalize_role(message[role_field]),
+                "role": canonicalize_role(
+                    message[role_field],
+                    preserve_developer=preserve_developer,
+                ),
                 "content": normalize_content_for_template(
                     message.get(content_field),
                     args.multimodal_mode,
@@ -433,12 +522,16 @@ def normalize_message_list(messages, args, role_field, content_field):
 
 def normalize_sharegpt(messages, args):
     normalized = []
+    preserve_developer = supports_developer_role(args)
     for message in messages:
         if not isinstance(message, dict):
             raise TypeError(f"Unsupported message type: {type(message)}")
         normalized.append(
             {
-                "role": canonicalize_role(message[args.sharegpt_role_field]),
+                "role": canonicalize_role(
+                    message[args.sharegpt_role_field],
+                    preserve_developer=preserve_developer,
+                ),
                 "content": normalize_content_for_template(
                     message.get(args.sharegpt_content_field),
                     args.multimodal_mode,
@@ -581,6 +674,7 @@ def tokenize_batch(batch, preprocessor, args):
             max_output_len=args.max_output_length,
             multimodal_mode=args.multimodal_mode,
             enable_thinking=args.enable_thinking,
+            reasoning_effort=args.reasoning_effort,
         ):
             results["model_inputs"].append(sample["model_inputs"])
             results["model_inputs_gen"].append(sample["model_inputs_gen"])
@@ -759,6 +853,13 @@ def parse_args():
         default="auto",
         choices=["auto", "true", "false"],
         help="pass enable_thinking to chat templates and strip think tags when false",
+    )
+    parser.add_argument(
+        "--reasoning_effort",
+        type=str,
+        default="auto",
+        choices=["auto", "low", "medium", "high"],
+        help="reasoning_effort to embed in GPT-OSS harmony chat templates",
     )
     parser.add_argument("--eval_size", type=int, default=DEFAULT_EVAL_SIZE)
     parser.add_argument("--eval_ratio", type=float, default=DEFAULT_EVAL_RATIO)

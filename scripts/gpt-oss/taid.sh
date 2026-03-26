@@ -1,0 +1,13 @@
+python train.py \
+    --student_model openai/gpt-oss-20b \
+    --teacher_model openai/gpt-oss-120b \
+    --tokenizer_model openai/gpt-oss-20b \
+    --data_path data/gpt-oss-20b \
+    --output_dir logs/gpt-oss-taid \
+    --batch_size 1 \
+    --num_epochs 5 \
+    --loss_type taid \
+    --attn_implementation sdpa \
+    --taid_t_start 0.4 \
+    --taid_alpha 5.e-4 \
+    --taid_beta 0.99

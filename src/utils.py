@@ -31,6 +31,16 @@ def normalize_chat_text(text: str) -> str:
     return text.strip()
 
 
+GPT_OSS_MESSAGE_RE = re.compile(
+    r"<\|start\|>assistant"
+    r"(?:<\|channel\|>(?P<channel>[^<]+))?"
+    r"(?:<\|recipient\|>[^<]+)?"
+    r"<\|message\|>(?P<body>.*?)(?=(?:<\|end\|>|<\|return\|>|$))",
+    flags=re.DOTALL,
+)
+GPT_OSS_SPECIAL_TOKEN_RE = re.compile(r"<\|[^>]+\|>")
+
+
 def get_text_tokenizer(preprocessor):
     return preprocessor.tokenizer if hasattr(preprocessor, "tokenizer") else preprocessor
 
@@ -43,6 +53,46 @@ def get_pad_token_id(preprocessor):
 def get_eos_token_id(preprocessor):
     tokenizer = get_text_tokenizer(preprocessor)
     return tokenizer.eos_token_id
+
+
+def is_gpt_oss_preprocessor(preprocessor) -> bool:
+    tokenizer = get_text_tokenizer(preprocessor)
+    name = str(getattr(tokenizer, "name_or_path", "")).lower()
+    if "gpt-oss" in name:
+        return True
+    chat_template = getattr(tokenizer, "chat_template", "") or ""
+    return "<|start|>assistant" in chat_template and "Reasoning:" in chat_template
+
+
+def extract_gpt_oss_visible_text(text: str) -> str:
+    final_parts = []
+    fallback_parts = []
+    for match in GPT_OSS_MESSAGE_RE.finditer(text):
+        channel = (match.group("channel") or "").strip()
+        body = GPT_OSS_SPECIAL_TOKEN_RE.sub("", match.group("body")).strip()
+        if not body:
+            continue
+        if channel == "final":
+            final_parts.append(body)
+        else:
+            fallback_parts.append(body)
+
+    selected = final_parts or fallback_parts
+    if selected:
+        return "\n".join(selected).strip()
+
+    stripped = GPT_OSS_SPECIAL_TOKEN_RE.sub("", text)
+    stripped = re.sub(r"assistant(?:analysis|commentary|final)+", "", stripped)
+    return stripped.strip()
+
+
+def decode_generated_texts(preprocessor, generated_ids: torch.Tensor) -> List[str]:
+    tokenizer = get_text_tokenizer(preprocessor)
+    if is_gpt_oss_preprocessor(preprocessor):
+        decoded = tokenizer.batch_decode(generated_ids, skip_special_tokens=False)
+        return [normalize_chat_text(extract_gpt_oss_visible_text(text)) for text in decoded]
+    decoded = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)
+    return [normalize_chat_text(text) for text in decoded]
 
 
 def get_generated_ids(generated_ids: torch.Tensor, input_ids: torch.Tensor):

@@ -53,9 +53,18 @@ Qwen3.5 is also supported:
 uv run python prepare_ultrachat.py --model_type qwen3.5 --output_dir data
 ```
 
+GPT-OSS is also supported for text-only TAID runs:
+
+```bash
+uv run python prepare_ultrachat.py \
+  --model_type gpt-oss-20b \
+  --output_dir data \
+  --reasoning_effort medium
+```
+
 `prepare_ultrachat.py` now expands each conversation into assistant-turn training samples and keeps long examples by selecting the largest fitting history window. For longer contexts, you can raise `--max_length` and `--max_output_length`; on Windows, `--num_proc` is capped automatically to avoid multiprocessing handle limits.
 
-For datasets other than UltraChat, use `prepare_chat_dataset.py`. It accepts Hugging Face datasets or local `json/jsonl/parquet`, supports `messages`, `chosen`, ShareGPT, Alpaca, and prompt-response layouts, and lets you control `--multimodal_mode` plus `--enable_thinking`.
+For datasets other than UltraChat, use `prepare_chat_dataset.py`. It accepts Hugging Face datasets or local `json/jsonl/parquet`, supports `messages`, `chosen`, ShareGPT, Alpaca, and prompt-response layouts, and lets you control `--multimodal_mode`, `--enable_thinking`, plus GPT-OSS `--reasoning_effort`.
 
 ```bash
 uv run python prepare_chat_dataset.py \
@@ -103,6 +112,19 @@ uv run python train.py \
   --loss_type taid
 ```
 
+GPT-OSS example:
+
+```bash
+uv run python train.py \
+  --teacher_model openai/gpt-oss-120b \
+  --student_model openai/gpt-oss-20b \
+  --tokenizer_model openai/gpt-oss-20b \
+  --data_path data/gpt-oss-20b \
+  --output_dir logs/gpt-oss-taid \
+  --loss_type taid \
+  --attn_implementation sdpa
+```
+
 Native multimodal Qwen3.5 example:
 
 ```bash
@@ -125,6 +147,7 @@ Relevant portability flags:
 - `--tokenizer_model <hf-repo-or-local-path>` when the tokenizer should differ from the teacher
 - `--processor_model <hf-repo-or-local-path>` and `--use_processor` for native multimodal models
 - `--trust_remote_code` for model families that still ship custom HF integrations
+- `--reasoning_effort low|medium|high` when preparing GPT-OSS harmony prompts
 
 ## Acknowledgement
 

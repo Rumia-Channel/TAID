@@ -53,9 +53,18 @@ Qwen3.5 もサポートしています:
 uv run python prepare_ultrachat.py --model_type qwen3.5 --output_dir data
 ```
 
+GPT-OSS の text-only TAID 用データも準備できます:
+
+```bash
+uv run python prepare_ultrachat.py \
+  --model_type gpt-oss-20b \
+  --output_dir data \
+  --reasoning_effort medium
+```
+
 `prepare_ultrachat.py` は会話を assistant 応答単位の学習サンプルへ展開し、長い会話でも入る最大の履歴窓を選ぶようになっています。より長い文脈を残したい場合は `--max_length` と `--max_output_length` を調整してください。Windows では multiprocessing の上限回避のため `--num_proc` が自動で抑えられます。
 
-UltraChat 以外のデータセットには `prepare_chat_dataset.py` を使ってください。Hugging Face dataset と local の `json/jsonl/parquet` に対応し、`messages`、`chosen`、ShareGPT、Alpaca、prompt-response を正規化できます。`--multimodal_mode` と `--enable_thinking` も指定できます。
+UltraChat 以外のデータセットには `prepare_chat_dataset.py` を使ってください。Hugging Face dataset と local の `json/jsonl/parquet` に対応し、`messages`、`chosen`、ShareGPT、Alpaca、prompt-response を正規化できます。`--multimodal_mode`、`--enable_thinking`、さらに GPT-OSS 向けの `--reasoning_effort` も指定できます。
 
 ```bash
 uv run python prepare_chat_dataset.py \
@@ -103,6 +112,19 @@ uv run python train.py \
   --loss_type taid
 ```
 
+GPT-OSS の例:
+
+```bash
+uv run python train.py \
+  --teacher_model openai/gpt-oss-120b \
+  --student_model openai/gpt-oss-20b \
+  --tokenizer_model openai/gpt-oss-20b \
+  --data_path data/gpt-oss-20b \
+  --output_dir logs/gpt-oss-taid \
+  --loss_type taid \
+  --attn_implementation sdpa
+```
+
 ネイティブ multimodal Qwen3.5 の例:
 
 ```bash
@@ -125,6 +147,7 @@ uv run python train.py \
 - `--tokenizer_model <hf-repo-or-local-path>`: tokenizer を teacher と分けたい場合
 - `--processor_model <hf-repo-or-local-path>` と `--use_processor`: ネイティブ multimodal モデルを使う場合
 - `--trust_remote_code`: 独自 HF 実装を使うモデル系を読み込む場合
+- `--reasoning_effort low|medium|high`: GPT-OSS の Harmony prompt を前処理するとき
 
 ## 謝辞
 
