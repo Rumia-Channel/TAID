@@ -113,6 +113,7 @@ class StreamingSFTDataModule(L.LightningDataModule):
         data_path: str,
         batch_size: int,
         num_workers: int,
+        trust_remote_code: bool = False,
         eval_batch_size: Optional[int] = None,
         max_input_len: int = 1536,
         max_output_len: int = 512,
@@ -122,7 +123,10 @@ class StreamingSFTDataModule(L.LightningDataModule):
         self.batch_size = batch_size
         self.eval_batch_size = eval_batch_size if eval_batch_size else batch_size
         self.num_workers = num_workers
-        self.tokenizer = load_tokenizer(tokenizer_path)
+        self.tokenizer = load_tokenizer(
+            tokenizer_path,
+            trust_remote_code=trust_remote_code,
+        )
 
         self.collate_fn = StreamingDataCollatorForLM(
             tokenizer=self.tokenizer,

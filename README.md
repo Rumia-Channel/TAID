@@ -37,7 +37,7 @@ uv run wandb login
 
 FlashAttention is now optional. When it is installed and CUDA is available, the training code uses `flash_attention_2`; otherwise it falls back to `sdpa` automatically.
 
-We conducted our original experiments in the following environment: Python 3.10.12 and CUDA 12.3 on 8 x H100 80GB. The default `uv` setup uses PyTorch 2.9.1 with backend-specific wheels.
+We conducted our original experiments in the following environment: Python 3.10.12 and CUDA 12.3 on 8 x H100 80GB. The `uv.lock` file pins a tested set of current dependencies, while the PyTorch wheel source still follows the selected backend (`cpu`, `cuda`, `rocm`, or `xpu`).
 
 ## Data Preparation
 
@@ -45,6 +45,12 @@ This is the script to prepare data for [Phi-3-mini](https://huggingface.co/micro
 
 ```bash
 uv run python prepare_ultrachat.py --model_type phi-3 --output_dir data
+```
+
+Qwen3.5 is also supported:
+
+```bash
+uv run python prepare_ultrachat.py --model_type qwen3.5 --output_dir data
 ```
 
 ## Training
@@ -66,12 +72,25 @@ uv run python train.py \
   --loss_type taid
 ```
 
+Qwen3.5 example:
+
+```bash
+uv run python train.py \
+  --teacher_model Qwen/Qwen3.5-9B \
+  --student_model Qwen/Qwen3.5-2B \
+  --data_path data/qwen3.5 \
+  --output_dir logs/qwen3.5-taid \
+  --loss_type taid
+```
+
 Relevant portability flags:
 
 - `--accelerator auto|cuda|xpu|cpu`
 - `--devices auto|1|0,1,2,3`
 - `--strategy auto|ddp|deepspeed_stage_2`
 - `--attn_implementation auto|sdpa|flash_attention_2`
+- `--tokenizer_model <hf-repo-or-local-path>` when the tokenizer should differ from the teacher
+- `--trust_remote_code` for model families that still ship custom HF integrations
 
 ## Acknowledgement
 

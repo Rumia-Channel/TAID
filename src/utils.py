@@ -1,4 +1,5 @@
 import os
+import re
 from typing import List
 from inspect import isfunction
 import itertools
@@ -23,6 +24,11 @@ def default(val, d):
 
 def flatten_list(x):
     return list(itertools.chain.from_iterable(x))
+
+
+def normalize_chat_text(text: str) -> str:
+    text = re.sub(r"<think>\s*.*?\s*</think>\s*", "", text, flags=re.DOTALL)
+    return text.strip()
 
 
 def get_generated_ids(generated_ids: torch.Tensor, input_ids: torch.Tensor):
@@ -99,10 +105,13 @@ def get_optimizer_params(model: nn.Module, loss_fn: nn.Module):
 
 
 def load_tokenizer(tokenizer_path: str, **tokenizer_kwargs):
-    if "phi-3" in tokenizer_path.lower():
+    tokenizer_name = tokenizer_path.lower()
+    if "phi-3" in tokenizer_name:
         tokenizer_kwargs["pad_token"] = "<unk>"
         tokenizer_kwargs["padding_side"] = "right"
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, **tokenizer_kwargs)
+    if "qwen" in tokenizer_name and tokenizer.padding_side != "right":
+        tokenizer.padding_side = "right"
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     return tokenizer

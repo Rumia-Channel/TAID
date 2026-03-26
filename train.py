@@ -52,10 +52,11 @@ if __name__ == "__main__":
     torch.set_float32_matmul_precision("high")
 
     data = StreamingSFTDataModule(
-        tokenizer_path=args.teacher_model,
+        tokenizer_path=args.tokenizer_model or args.teacher_model,
         data_path=args.data_path,
         batch_size=args.batch_size,
         num_workers=args.num_workers,
+        trust_remote_code=args.trust_remote_code,
     )
     model = KDForLM(args, tokenizer=data.tokenizer)
     modelcheckpoint = ModelCheckpoint(
@@ -73,8 +74,8 @@ if __name__ == "__main__":
         precision=args.precision,
         gradient_clip_val=1.0,
         num_sanity_val_steps=0,
-        limit_train_batches=10,
-        limit_val_batches=5,
+        limit_train_batches=args.limit_train_batches,
+        limit_val_batches=args.limit_val_batches,
         accumulate_grad_batches=args.accumulate_grad_batches,
         strategy=get_strategy(args),
         callbacks=[modelcheckpoint],

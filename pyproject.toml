@@ -5,42 +5,43 @@ description = "Temporally Adaptive Interpolated Distillation for language models
 readme = "README.md"
 requires-python = ">=3.10,<3.13"
 dependencies = [
-    "absl-py==2.1.0",
-    "accelerate==0.28.0",
-    "datasets==2.18.0",
-    "evaluate==0.4.1",
-    "lightning==2.2.3",
-    "litdata==0.2.15",
-    "natsort==8.4.0",
-    "nltk==3.8.1",
-    "numerize==0.12",
-    "numpy==1.26.4",
-    "protobuf==3.20.3",
-    "rich==13.7.1",
-    "rouge-score==0.1.2",
-    "sentencepiece==0.2.0",
-    "torchtyping==0.1.4",
-    "transformers==4.41.2",
-    "wandb==0.16.6",
+    "absl-py",
+    "accelerate",
+    "datasets",
+    "evaluate",
+    "lightning",
+    "litdata",
+    "natsort",
+    "nltk",
+    "numerize",
+    "numpy",
+    "protobuf",
+    "rich",
+    "rouge-score",
+    "safetensors",
+    "sentencepiece",
+    "torchtyping",
+    "transformers",
+    "wandb",
 ]
 
 [project.optional-dependencies]
 cpu = [
-    "torch==2.9.1",
+    "torch",
 ]
 cuda = [
-    "torch==2.9.1; sys_platform == 'linux' or sys_platform == 'win32'",
+    "torch; sys_platform == 'linux' or sys_platform == 'win32'",
 ]
 rocm = [
-    "torch==2.9.1; sys_platform == 'linux'",
+    "torch; sys_platform == 'linux'",
     "pytorch-triton-rocm; sys_platform == 'linux'",
 ]
 xpu = [
-    "torch==2.9.1; sys_platform == 'linux' or sys_platform == 'win32'",
+    "torch; sys_platform == 'linux' or sys_platform == 'win32'",
     "pytorch-triton-xpu; sys_platform == 'linux' or sys_platform == 'win32'",
 ]
 deepspeed = [
-    "deepspeed>=0.16,<0.19; sys_platform == 'linux'",
+    "deepspeed; sys_platform == 'linux'",
 ]
 
 [tool.uv]

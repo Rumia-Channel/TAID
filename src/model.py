@@ -6,7 +6,13 @@ from transformers import get_scheduler, GenerationConfig, AutoModelForCausalLM
 from src.metrics import compute_metrics
 from src.loss import get_loss_fn, LossOutput
 from src.sampler import get_sampler
-from src.utils import default, flatten_list, get_generated_ids, get_optimizer_params
+from src.utils import (
+    default,
+    flatten_list,
+    get_generated_ids,
+    get_optimizer_params,
+    normalize_chat_text,
+)
 
 
 def initialize_generation_config(tokenizer, generation_config):
@@ -57,17 +63,20 @@ class KDForLM(L.LightningModule):
         attn_implementation = resolve_attn_implementation(
             self.args.attn_implementation
         )
+        model_kwargs = {
+            "torch_dtype": torch.bfloat16,
+            "attn_implementation": attn_implementation,
+            "trust_remote_code": self.args.trust_remote_code,
+        }
         self.print(f"Using attention implementation: {attn_implementation}")
         self.student_model = AutoModelForCausalLM.from_pretrained(
             self.args.student_model,
-            torch_dtype=torch.bfloat16,
-            attn_implementation=attn_implementation,
+            **model_kwargs,
         )
         self.student_model.resize_token_embeddings(len(self.tokenizer))
         self.teacher_model = AutoModelForCausalLM.from_pretrained(
             self.args.teacher_model,
-            torch_dtype=torch.bfloat16,
-            attn_implementation=attn_implementation,
+            **model_kwargs,
         )
         self.teacher_model.resize_token_embeddings(len(self.tokenizer))
 
@@ -138,6 +147,7 @@ class KDForLM(L.LightningModule):
         generated_answers = self.tokenizer.batch_decode(
             generated_ids, skip_special_tokens=True
         )
+        generated_answers = [normalize_chat_text(answer) for answer in generated_answers]
         return generated_answers, response
 
     def _compute_metric(self, outputs, step="val"):

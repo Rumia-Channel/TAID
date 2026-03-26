@@ -9,19 +9,42 @@ MODELS = {
     "phi-3": "microsoft/Phi-3-mini-4k-instruct",
     "llama-2": "meta-llama/Llama-2-7b-chat-hf",
     "stablelm": "stabilityai/stablelm-zephyr-3b",
+    "qwen3.5": "Qwen/Qwen3.5-9B",
 }
 MAX_LENGTH = 2048
 MAX_OUTPUT_LENGTH = 512
 
 
+def get_message_text(content):
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(
+            item.get("text", "") for item in content if item.get("type") == "text"
+        )
+    raise TypeError(f"Unsupported content type: {type(content)}")
+
+
+def build_chat_pair(messages, tokenizer):
+    if messages[-1]["role"] != "assistant":
+        raise ValueError("The last message must be from the assistant.")
+
+    prompt_text = tokenizer.apply_chat_template(
+        messages[:-1],
+        tokenize=False,
+        add_generation_prompt=True,
+    )
+    full_text = tokenizer.apply_chat_template(
+        messages,
+        tokenize=False,
+        add_generation_prompt=False,
+    )
+    return prompt_text, full_text, get_message_text(messages[-1]["content"])
+
+
 def tokenize(example, tokenizer):
     column = "messages" if "messages" in example else "chosen"
-    text = tokenizer.apply_chat_template(
-        example[column], tokenize=False, add_generation_prompt=False
-    )
-    messages = text.split(generation_prompt)
-    input_text = generation_prompt.join(messages[:-1]) + generation_prompt
-    output_text = messages[-1]
+    input_text, text, output_text = build_chat_pair(example[column], tokenizer)
     input_ids = tokenizer(text, return_tensors="pt").input_ids
     res = {"model_inputs": {"input_ids": input_ids, "labels": input_ids.clone()}}
 
@@ -31,7 +54,7 @@ def tokenize(example, tokenizer):
     return res
 
 
-def filter_length(example, max_input_len, max_output_len):
+def filter_length(example, tokenizer, max_input_len, max_output_len):
     max_length = max_input_len + max_output_len
     if example["model_inputs"]["input_ids"].size(1) > max_length:
         return False
@@ -61,6 +84,7 @@ def prepare_train(args, tokenizer):
     dataset = dataset.filter(
         filter_length,
         fn_kwargs={
+            "tokenizer": tokenizer,
             "max_input_len": MAX_LENGTH - MAX_OUTPUT_LENGTH,
             "max_output_len": MAX_OUTPUT_LENGTH,
         },
@@ -91,6 +115,7 @@ def prepare_test(args, tokenizer):
     dataset = dataset.filter(
         filter_length,
         fn_kwargs={
+            "tokenizer": tokenizer,
             "max_input_len": MAX_LENGTH - MAX_OUTPUT_LENGTH,
             "max_output_len": MAX_OUTPUT_LENGTH,
         },
@@ -119,12 +144,27 @@ if __name__ == "__main__":
         default="phi-3",
         help="Teacher type",
     )
+    parser.add_argument(
+        "--tokenizer_name",
+        type=str,
+        default=None,
+        help="optional tokenizer/model path override for chat templating",
+    )
     parser.add_argument("--output_dir", type=str, default="data")
     parser.add_argument(
         "--num_proc", type=int, default=64, help="number of workers for processing"
     )
+    parser.add_argument(
+        "--trust_remote_code",
+        action="store_true",
+        help="allow transformers to load custom tokenizer code",
+    )
     args = parser.parse_args()
-    tokenizer = AutoTokenizer.from_pretrained(MODELS[args.model_type])
+    tokenizer_path = args.tokenizer_name or MODELS[args.model_type]
+    tokenizer = AutoTokenizer.from_pretrained(
+        tokenizer_path,
+        trust_remote_code=args.trust_remote_code,
+    )
     if args.model_type == "phi-3":
         # https://huggingface.co/microsoft/Phi-3-mini-128k-instruct/blob/main/sample_finetune.py#L141
         tokenizer.pad_token = (
@@ -132,12 +172,7 @@ if __name__ == "__main__":
         )  # use unk rather than eos token to prevent endless generation
         tokenizer.pad_token_id = tokenizer.convert_tokens_to_ids(tokenizer.pad_token)
         tokenizer.padding_side = "right"
-
-    if args.model_type in ["phi-3", "stablelm"]:
-        generation_prompt = "<|assistant|>\n"
-    elif args.model_type in ["llama-2"]:
-        generation_prompt = " [/INST] "
-    else:
-        raise NotImplementedError(args.model_type)
+    elif tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
     prepare_train(args, tokenizer)
     prepare_test(args, tokenizer)

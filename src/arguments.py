@@ -17,6 +17,17 @@ def parse_args():
         default="microsoft/Phi-3-mini-4k-instruct",
         help="teacher model path",
     )
+    parser.add_argument(
+        "--tokenizer_model",
+        type=str,
+        default=None,
+        help="tokenizer path (defaults to teacher model)",
+    )
+    parser.add_argument(
+        "--trust_remote_code",
+        action="store_true",
+        help="allow transformers to load custom model or tokenizer code",
+    )
 
     # training args
     parser.add_argument(
@@ -25,6 +36,18 @@ def parse_args():
     parser.add_argument("--data_path", type=str, required=True, help="path to data dir")
     parser.add_argument("--num_epochs", type=int, default=5, help="number of epochs")
     parser.add_argument("--val_check_interval", type=float, default=1.0)
+    parser.add_argument(
+        "--limit_train_batches",
+        type=float,
+        default=1.0,
+        help="fraction or count of train batches per epoch",
+    )
+    parser.add_argument(
+        "--limit_val_batches",
+        type=float,
+        default=1.0,
+        help="fraction or count of validation batches",
+    )
     parser.add_argument("--accumulate_grad_batches", type=int, default=1)
     parser.add_argument(
         "--validate_first", action="store_true", help="run validation before training"
